@@ -1,8 +1,6 @@
 _base_ = ['../PixArt_xl2_design.py']
-data_root = 'data'
-image_list_txt = ['part0.txt']
+data = dict(type='canva', load_vae_feat=False)
 
-data = dict(type='design', root='SA1B', image_list_txt=image_list_txt, transform='default_train', load_vae_feat=False)
 image_size = 512
 
 # model setting
@@ -12,7 +10,7 @@ use_rel_pos=False
 model = 'PixArt_XL_2'
 fp32_attention = True
 load_from = False
-vae_pretrained = "/home/ld/Project/PixArt-alpha/output/pretrained_models/sd-vae-ft-ema"
+vae_pretrained = "/output/pretrained_models/sd-vae-ft-ema"
 lewei_scale = 1.0
 model_max_length=512
 

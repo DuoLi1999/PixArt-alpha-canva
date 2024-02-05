@@ -76,8 +76,8 @@ def train():
                         else:
                             z = posterior.mode()
             clean_images = z * config.scale_factor
-            y = batch[1]
-            y_mask = batch[2]
+            y = batch[1].unsqueeze(1)
+            y_mask = None
             data_info = batch[3]
 
             # Sample a random timestep for each image
@@ -111,7 +111,7 @@ def train():
                 # avg_loss = sum(loss_buffer) / len(loss_buffer)
                 log_buffer.average()
                 info = f"Step/Epoch [{(epoch-1)*len(train_dataloader)+step+1}/{epoch}][{step + 1}/{len(train_dataloader)}]:total_eta: {eta}, " \
-                       f"epoch_eta:{eta_epoch}, time_all:{t:.3f}, time_data:{t_d:.3f}, lr:{lr:.3e}, s:({data_info['img_hw'][0][0].item()}, {data_info['img_hw'][0][1].item()}), "
+                       f"epoch_eta:{eta_epoch}, time_all:{t:.3f}, time_data:{t_d:.3f}, lr:{lr:.3e}, "
                 info += ', '.join([f"{k}:{v:.4f}" for k, v in log_buffer.output.items()])
                 logger.info(info)
                 last_tic = time.time()
@@ -154,18 +154,19 @@ def train():
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Process some integers.")
-    parser.add_argument("config", type=str, help="config")
+    # parser.add_argument("config", type=str, help="config")
     parser.add_argument("--cloud", action='store_true', default=False, help="cloud or local machine")
-    parser.add_argument('--work-dir', help='the dir to save logs and models')
+    parser.add_argument('--work-dir', help='the dir to save logs and models',default='output/test')
     parser.add_argument('--resume-from', help='the dir to resume the training')
-    parser.add_argument('--load-from', default=None, help='the dir to load a ckpt for training')
+    parser.add_argument('--load-from', default='/output/PixArt-XL-2-512x512.pth', help='the dir to load a ckpt for training')
     parser.add_argument('--local-rank', type=int, default=-1)
     parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--blob-path', default='/openseg_blob' )
     parser.add_argument(
         "--report_to",
         type=str,
-        default="tensorboard",
+        default="wandb",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -188,7 +189,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    config = read_config(args.config)
+    config = read_config('configs/pixart_config/PixArt_xl2_img512_design.py')
     if args.work_dir is not None:
         # update configs according to CLI args if args.work_dir is not None
         config.work_dir = args.work_dir
@@ -285,8 +286,23 @@ if __name__ == '__main__':
             m.clip_grad_norm_ = types.MethodType(clip_grad_norm_, m)
 
     # build dataloader
-    set_data_root(config.data_root)
-    dataset = build_dataset(config.data, resolution=image_size, aspect_ratio_type=config.aspect_ratio_type)
+    # set_data_root(config.data_root)
+    # dataset = build_dataset(config.data, resolution=image_size, aspect_ratio_type=config.aspect_ratio_type)
+    from canva.dataset import Canva8ChannelsDataset   
+
+    dataset = Canva8ChannelsDataset(
+            resolution=512,
+            proportion_empty_prompts=0.1,
+            use_embed=True,
+            prompt_with_text=True,
+            img_path= args.blob_path +'/weicong/big_file/data/canva-data/canva-render-10.19/',
+            ann_path= args.blob_path +'/weicong/big_file/data/canva-data/canva-binmask/canva-binmask-index.json',
+            embed_dir= args.blob_path +'/weicong/big_file/data/canva-data/canva-binmask-t5-a100/',
+            category='all',
+            img_type='img', # all(8), aux(8+3), img(3), bg(3)
+            target_img_type=None,
+            prompt_mode = 'whole',
+            )   
     if config.multi_scale:
         batch_sampler = AspectRatioBatchSampler(sampler=RandomSampler(dataset), dataset=dataset,
                                                 batch_size=config.train_batch_size, aspect_ratios=dataset.aspect_ratio, drop_last=True,
