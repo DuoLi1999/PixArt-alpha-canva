@@ -193,8 +193,8 @@ class PixArt(nn.Module):
         nn.init.normal_(self.t_block[1].weight, std=0.02)
 
         # Initialize caption embedding MLP:
-        nn.init.normal_(self.y_embedder.y_proj_1.fc1.weight, std=0.02)
-        nn.init.normal_(self.y_embedder.y_proj_1.fc2.weight, std=0.02)
+        nn.init.normal_(self.y_embedder.y_proj.fc1.weight, std=0.02)
+        nn.init.normal_(self.y_embedder.y_proj.fc2.weight, std=0.02)
 
         # Zero-out adaLN modulation layers in PixArt blocks:
         for block in self.blocks:

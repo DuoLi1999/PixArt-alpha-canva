@@ -347,7 +347,7 @@ class CaptionEmbedder(nn.Module):
 
     def __init__(self, in_channels, hidden_size, uncond_prob, act_layer=nn.GELU(approximate='tanh'), token_num=120):
         super().__init__()
-        self.y_proj_1 = Mlp(in_features=in_channels, hidden_features=hidden_size, out_features=hidden_size, act_layer=act_layer, drop=0)
+        self.y_proj = Mlp(in_features=in_channels, hidden_features=hidden_size, out_features=hidden_size, act_layer=act_layer, drop=0)
         self.register_buffer("y_embedding_1", nn.Parameter(torch.randn(token_num, in_channels) / in_channels ** 0.5))
         self.uncond_prob = uncond_prob
 
@@ -368,7 +368,7 @@ class CaptionEmbedder(nn.Module):
         use_dropout = self.uncond_prob > 0
         if (train and use_dropout) or (force_drop_ids is not None):
             caption = self.token_drop(caption, force_drop_ids)
-        caption = self.y_proj_1(caption)
+        caption = self.y_proj(caption)
         return caption
 
 
