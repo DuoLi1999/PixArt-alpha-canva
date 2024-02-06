@@ -15,7 +15,7 @@ from accelerate.utils import DistributedType
 from diffusers.models import AutoencoderKL
 from mmcv.runner import LogBuffer
 from torch.utils.data import RandomSampler
-
+from inference import visualize
 from diffusion import IDDPM
 from diffusion.data.builder import build_dataset, build_dataloader, set_data_root
 from diffusion.model.builder import build_model
@@ -117,6 +117,10 @@ def train():
                 last_tic = time.time()
                 log_buffer.clear()
                 data_time_all = 0
+
+            if step %10 == 0:
+                visualize(model,vae,args.emb_path,step,y.device)
+
             logs.update(lr=lr)
             accelerator.log(logs, step=global_step + start_step)
 
@@ -158,11 +162,12 @@ def parse_args():
     parser.add_argument("--cloud", action='store_true', default=False, help="cloud or local machine")
     parser.add_argument('--work-dir', help='the dir to save logs and models',default='output/test')
     parser.add_argument('--resume-from', help='the dir to resume the training')
-    parser.add_argument('--load-from', default='/output/PixArt-XL-2-512x512.pth', help='the dir to load a ckpt for training')
+    parser.add_argument('--load-from', default='/home/ld/Project/PixArt-alpha/output/PixArt-XL-2-512x512.pth', help='the dir to load a ckpt for training')
     parser.add_argument('--local-rank', type=int, default=-1)
     parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--blob-path', default='/openseg_blob' )
+    parser.add_argument('--blob-path', default='/home/ld/Project/PixArt-alpha/openseg_blob' )
+    parser.add_argument('--emb_path',default='/home/ld/Project/SA-1B-Downloader-main/text_embed.pt' )
     parser.add_argument(
         "--report_to",
         type=str,
@@ -189,7 +194,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    config = read_config('configs/pixart_config/PixArt_xl2_img512_design.py')
+    config = read_config('/home/ld/Project/PixArt-alpha-canva/configs/pixart_config/PixArt_xl2_img512_design.py')
     if args.work_dir is not None:
         # update configs according to CLI args if args.work_dir is not None
         config.work_dir = args.work_dir
