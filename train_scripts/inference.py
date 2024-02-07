@@ -17,17 +17,17 @@ from diffusion.data.datasets import get_chunks, ASPECT_RATIO_512_TEST, ASPECT_RA
 
 
 @torch.inference_mode()
-def visualize(model,vae,path,step,device,bs=1, sample_steps=20, cfg_scale=4.5):
+def visualize(model,vae,path,step,device,bs=1, resolution=512, ar=1.,sample_steps=20, cfg_scale=4.5):
     caption_embs = torch.load(path, map_location=torch.device(device))
     model.eval()
-    latent_size = 512 // 8
+    latent_size = resolution // 8
 
     samples_list=[]
     for chunk in tqdm(list(get_chunks(caption_embs, bs)), unit='batch'):
-        if bs == 1:     
-            hw = torch.tensor([[512,512]], dtype=torch.float, device=device).repeat(bs, 1)
-            ar = torch.tensor([[1.]], device=device).repeat(bs, 1)
-            latent_size_h, latent_size_w = latent_size, latent_size
+        # if bs == 1:     
+        hw = torch.tensor([[resolution,resolution]], dtype=torch.float, device=device).repeat(bs, 1)
+        ar = torch.tensor([[ar]], device=device).repeat(bs, 1)
+        latent_size_h, latent_size_w = latent_size, latent_size
 
         null_y = model.y_embedder.y_embedding_1[None].repeat(1, 1, 1)[:, None]
 

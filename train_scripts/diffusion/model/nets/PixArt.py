@@ -27,14 +27,15 @@ class PixArtBlock(nn.Module):
     A PixArt block with adaptive layer norm (adaLN-single) conditioning.
     """
 
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, drop_path=0., window_size=0, input_size=None, use_rel_pos=False, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, drop_path=0., window_size=0, input_size=None, use_rel_pos=False,use_flash_attn=False, **block_kwargs):
         super().__init__()
         self.hidden_size = hidden_size
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = WindowAttention(hidden_size, num_heads=num_heads, qkv_bias=True,
                                     input_size=input_size if window_size == 0 else (window_size, window_size),
-                                    use_rel_pos=use_rel_pos, **block_kwargs)
-        self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, **block_kwargs)
+                                    use_rel_pos=use_rel_pos, 
+                                    use_flash_attn=use_flash_attn,**block_kwargs)
+        self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, use_flash_attn=use_flash_attn,**block_kwargs)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         # to be compatible with lower version pytorch
         approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -63,7 +64,7 @@ class PixArt(nn.Module):
     Diffusion model with a Transformer backbone.
     """
 
-    def __init__(self, input_size=32, patch_size=2, in_channels=4, hidden_size=1152, depth=28, num_heads=16, mlp_ratio=4.0, class_dropout_prob=0.1, pred_sigma=True, drop_path: float = 0., window_size=0, window_block_indexes=None, use_rel_pos=False, caption_channels=4096, lewei_scale=1.0, config=None, model_max_length=120, **kwargs):
+    def __init__(self, input_size=32, patch_size=2, in_channels=4, hidden_size=1152, depth=28, num_heads=16, mlp_ratio=4.0, class_dropout_prob=0.1, pred_sigma=True, drop_path: float = 0., window_size=0, window_block_indexes=None, use_rel_pos=False, caption_channels=4096, lewei_scale=1.0, config=None, model_max_length=120,use_flash_attn=False, **kwargs):
         if window_block_indexes is None:
             window_block_indexes = []
         super().__init__()
@@ -92,7 +93,7 @@ class PixArt(nn.Module):
             PixArtBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, drop_path=drop_path[i],
                           input_size=(input_size // patch_size, input_size // patch_size),
                           window_size=window_size if i in window_block_indexes else 0,
-                          use_rel_pos=use_rel_pos if i in window_block_indexes else False)
+                          use_rel_pos=use_rel_pos if i in window_block_indexes else False,use_flash_attn=use_flash_attn)
             for i in range(depth)
         ])
         self.final_layer = T2IFinalLayer(hidden_size, patch_size, self.out_channels)

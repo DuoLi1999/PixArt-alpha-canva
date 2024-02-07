@@ -27,13 +27,14 @@ def t2i_modulate(x, shift, scale):
 
 
 class MultiHeadCrossAttention(nn.Module):
-    def __init__(self, d_model, num_heads, attn_drop=0., proj_drop=0., **block_kwargs):
+    def __init__(self, d_model, num_heads, attn_drop=0., proj_drop=0., use_flash_attn=False,**block_kwargs):
         super(MultiHeadCrossAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
 
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
+        self.use_flash_attn = use_flash_attn
 
         self.q_linear = nn.Linear(d_model, d_model)
         self.kv_linear = nn.Linear(d_model, d_model*2)
@@ -51,7 +52,11 @@ class MultiHeadCrossAttention(nn.Module):
         attn_bias = None
         if mask is not None:
             attn_bias = xformers.ops.fmha.BlockDiagonalMask.from_seqlens([N] * B, mask)
-        x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+        #支持flash attention
+        if self.use_flash_attn:
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+        else:
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
         x = x.view(B, -1, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -82,6 +87,7 @@ class WindowAttention(Attention_):
         use_rel_pos=False,
         rel_pos_zero_init=True,
         input_size=None,
+        use_flash_attn=False,
         **block_kwargs,
     ):
         """
@@ -97,6 +103,7 @@ class WindowAttention(Attention_):
         super().__init__(dim, num_heads=num_heads, qkv_bias=qkv_bias, **block_kwargs)
 
         self.use_rel_pos = use_rel_pos
+        self.use_flash_attn = use_flash_attn
         if self.use_rel_pos:
             # initialize relative positional embeddings
             self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, self.head_dim))
@@ -117,7 +124,12 @@ class WindowAttention(Attention_):
         if mask is not None:
             attn_bias = torch.zeros([B * self.num_heads, q.shape[1], k.shape[1]], dtype=q.dtype, device=q.device)
             attn_bias.masked_fill_(mask.squeeze(1).repeat(self.num_heads, 1, 1) == 0, float('-inf'))
-        x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+        #支持flash attention
+        if self.use_flash_attn:
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+
+        else:
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
 
         x = x.view(B, N, C)
         x = self.proj(x)
@@ -129,6 +141,9 @@ class WindowAttention(Attention_):
 #   AMP attention with fp32 softmax to fix loss NaN problem during training     #
 #################################################################################
 class Attention(Attention_):
+    def __init__(self,use_flash_attn=False, **block_kwargs):
+        super().__init__(**block_kwargs)
+        self.use_flash_attn = use_flash_attn
     def forward(self, x):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)

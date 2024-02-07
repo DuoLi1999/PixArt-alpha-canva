@@ -13,6 +13,7 @@ load_from = False
 vae_pretrained = "/output/pretrained_models/sd-vae-ft-ema"
 lewei_scale = 1.0
 model_max_length=512
+use_falsh_attn= False
 
 # training setting
 use_fsdp=False   # if use FSDP mode

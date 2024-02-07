@@ -297,7 +297,7 @@ if __name__ == '__main__':
 
     dataset = Canva8ChannelsDataset(
             resolution=512,
-            proportion_empty_prompts=0.1,
+            proportion_empty_prompts=0.0,
             use_embed=True,
             prompt_with_text=True,
             img_path= args.blob_path +'/weicong/big_file/data/canva-data/canva-render-10.19/',

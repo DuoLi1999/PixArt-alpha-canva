@@ -47,7 +47,7 @@ def build_dataset(cfg):
 class Canva8ChannelsDataset(Dataset):
     def __init__(self,
                 resolution=256,
-                proportion_empty_prompts=0.1,
+                proportion_empty_prompts=0.0,
                 use_embed=True,
                 prompt_with_text=True,
                 img_path='/home/ld/Project/PixArt-alpha/openseg_blob/weicong/big_file/data/canva-data/canva-render-10.19/',
@@ -57,6 +57,7 @@ class Canva8ChannelsDataset(Dataset):
                 img_type='img', # all(8), aux(8+3), img(3), bg(3)
                 target_img_type=None,
                 prompt_mode = 'whole',
+                train="train"
         ):
         self.resolution = resolution
         self.img_path = img_path
@@ -79,6 +80,11 @@ class Canva8ChannelsDataset(Dataset):
         else:
             with open(ann_path, 'r') as f:
                 self.ann_list = json.load(f)
+        if train=="train":
+            self.ann_list = self.ann_list[:-50000]
+        elif train=='val':
+            self.ann_list = self.ann_list[-50000:]
+
 
     def __len__(self):
         return len(self.ann_list)
