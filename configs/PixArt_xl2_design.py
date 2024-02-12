@@ -32,7 +32,8 @@ lr_schedule_args = dict(num_warmup_steps=500)
 
 save_image_epochs = 1
 save_model_epochs = 1
-save_model_steps=1000000
+save_model_steps=2000
+sample_model_steps=1000
 
 sample_posterior = True
 mixed_precision = 'fp16'

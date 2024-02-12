@@ -68,6 +68,8 @@ class Canva8ChannelsDataset(Dataset):
         self.prompt_with_text = prompt_with_text
         self.prompt_mode = prompt_mode
         self.proportion_empty_prompts = proportion_empty_prompts
+        self.tokenizer =  AutoTokenizer.from_pretrained('/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/output/pretrained_models/t5_ckpts/t5-v1_1-xxl')
+
         self.transforms = torchvision.transforms.Compose([
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize([0.5], [0.5])
@@ -128,6 +130,20 @@ class Canva8ChannelsDataset(Dataset):
                 embed_path = osp.join(self.embed_dir, 'empty.npy')
                 text_embed = np.load(embed_path)
                 text_embed = torch.from_numpy(text_embed).squeeze(0)
+        text_tokens_and_mask = self.tokenizer(
+            prompt,
+            max_length=512,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            add_special_tokens=True,
+            return_tensors='pt'
+        )
+        # if text_embed[-1].equal(text_embed[-2]):
+        #     mask=torch.ones(text_embed.size(0),dtype=torch.bool)
 
-        return alpha_tensor,text_embed,False,False
+        # else:
+        #     mask=~torch.all(text_embed-text_embed[-1]==0,dim=-1)
+        mask=text_tokens_and_mask['attention_mask']>0
+        return alpha_tensor,text_embed,mask.squeeze(0),False
         

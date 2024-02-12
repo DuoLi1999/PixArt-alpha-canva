@@ -8,12 +8,12 @@ window_block_indexes=[]
 window_size=0
 use_rel_pos=False
 model = 'PixArt_XL_2'
-fp32_attention = True
+fp32_attention = True #True
 load_from = False
-vae_pretrained = "/output/pretrained_models/sd-vae-ft-ema"
+vae_pretrained = "/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/output/pretrained_models/sd-vae-ft-ema"
 lewei_scale = 1.0
 model_max_length=512
-use_falsh_attn= False
+use_flash_attn= True
 
 # training setting
 use_fsdp=False   # if use FSDP mode
@@ -29,4 +29,4 @@ lr_schedule_args = dict(num_warmup_steps=1000)
 eval_sampling_steps = 200
 log_interval = 20
 save_model_epochs=1
-work_dir = 'output/debug'
+work_dir = 'output/try'

@@ -55,11 +55,12 @@ def train():
     log_buffer = LogBuffer()
 
     start_step = start_epoch * len(train_dataloader)
-    global_step = 0
+    global_step = 1
     total_steps = len(train_dataloader) * config.num_epochs
 
     load_vae_feat = getattr(train_dataloader.dataset, 'load_vae_feat', False)
     # Now you train the model
+    start= time.time()
     for epoch in range(start_epoch + 1, config.num_epochs + 1):
         data_time_start= time.time()
         data_time_all = 0
@@ -77,7 +78,8 @@ def train():
                             z = posterior.mode()
             clean_images = z * config.scale_factor
             y = batch[1].unsqueeze(1)
-            y_mask = None
+            # y_mask = None
+            y_mask = batch[2].unsqueeze(1).unsqueeze(1)
             data_info = batch[3]
 
             # Sample a random timestep for each image
@@ -118,8 +120,10 @@ def train():
                 log_buffer.clear()
                 data_time_all = 0
 
-            if step %10 == 0:
-                visualize(model,vae,args.emb_path,step,y.device)
+            if global_step%config.sample_model_steps==0:
+                if accelerator.is_main_process:
+                    visualize(accelerator.unwrap_model(model),vae,args.emb_path,global_step,y.device,args.tracker_experiment_name)
+
 
             logs.update(lr=lr)
             accelerator.log(logs, step=global_step + start_step)
@@ -140,6 +144,10 @@ def train():
                                     lr_scheduler=lr_scheduler
                                     )
             synchronize()
+            if step>=10:
+                temp=time.time() - start
+                print('step time:',temp)
+                raise ValueError('stop')
 
         synchronize()
         if accelerator.is_main_process:
@@ -162,16 +170,16 @@ def parse_args():
     parser.add_argument("--cloud", action='store_true', default=False, help="cloud or local machine")
     parser.add_argument('--work-dir', help='the dir to save logs and models',default='output/test')
     parser.add_argument('--resume-from', help='the dir to resume the training')
-    parser.add_argument('--load-from', default='/home/ld/Project/PixArt-alpha/output/PixArt-XL-2-512x512.pth', help='the dir to load a ckpt for training')
+    parser.add_argument('--load-from', default='/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/output/PixArt-XL-2-512x512.pth', help='the dir to load a ckpt for training')
     parser.add_argument('--local-rank', type=int, default=-1)
     parser.add_argument('--local_rank', type=int, default=-1)
     parser.add_argument('--debug', action='store_true')
-    parser.add_argument('--blob-path', default='/home/ld/Project/PixArt-alpha/openseg_blob' )
-    parser.add_argument('--emb_path',default='/home/ld/Project/SA-1B-Downloader-main/text_embed.pt' )
+    parser.add_argument('--blob-path', default='/pyy/openseg_blob' )
+    parser.add_argument('--emb_path',default='/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/samples/text_embed.pt' )
     parser.add_argument(
         "--report_to",
         type=str,
-        default="wandb",
+        default="tensorboard",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -186,6 +194,15 @@ def parse_args():
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
         ),
     )
+    parser.add_argument(
+        "--tracker_experiment_name",
+        type=str,
+        default="unmask_lr2e-5",
+        help=(
+            "The `experiment_name` argument passed to Accelerator.init_trackers for"
+            " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
+        ),
+    )
     parser.add_argument("--loss_report_name", type=str, default="loss")
 
     args = parser.parse_args()
@@ -194,7 +211,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    config = read_config('/home/ld/Project/PixArt-alpha-canva/configs/pixart_config/PixArt_xl2_img512_design.py')
+    config = read_config('/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/configs/pixart_config/PixArt_xl2_img512_design.py')
     if args.work_dir is not None:
         # update configs according to CLI args if args.work_dir is not None
         config.work_dir = args.work_dir
@@ -316,7 +333,7 @@ if __name__ == '__main__':
         # batch_sampler = BalancedAspectRatioBatchSampler(sampler=RandomSampler(dataset), dataset=dataset,
         #                                                 batch_size=config.train_batch_size, aspect_ratios=dataset.aspect_ratio,
         #                                                 ratio_nums=dataset.ratio_nums)
-        train_dataloader = build_dataloader(dataset, batch_sampler=batch_sampler, num_workers=config.num_workers)
+        train_dataloader = build_dataloader(dataset, batch_sampler=batch_sampler, num_workers=config.num_workers,shuffle=True)
     else:
         train_dataloader = build_dataloader(dataset, num_workers=config.num_workers, batch_size=config.train_batch_size, shuffle=True)
 
@@ -333,7 +350,7 @@ if __name__ == '__main__':
     if accelerator.is_main_process:
         tracker_config = dict(vars(config))
         try:
-            accelerator.init_trackers(args.tracker_project_name, tracker_config)
+            accelerator.init_trackers(args.tracker_project_name, tracker_config, init_kwargs={args.report_to:{"name":args.tracker_experiment_name}})
         except:
             accelerator.init_trackers(f"tb_{timestamp}")
 

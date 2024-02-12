@@ -68,6 +68,11 @@ class PixArt(nn.Module):
         if window_block_indexes is None:
             window_block_indexes = []
         super().__init__()
+        if use_flash_attn:
+            print('Using Flash Attention')
+        else:
+            print('Not Using Flash Attention')
+        raise ValueError('Not Using Flash Attention')
         self.pred_sigma = pred_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if pred_sigma else in_channels
@@ -121,7 +126,7 @@ class PixArt(nn.Module):
         if mask is not None:
             if mask.shape[0] != y.shape[0]:
                 mask = mask.repeat(y.shape[0] // mask.shape[0], 1)
-            mask = mask.squeeze(1).squeeze(1)
+            mask = mask.squeeze(1).squeeze(1)  # (N, 1, 1, L) -> (N, L)
             y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
             y_lens = mask.sum(dim=1).tolist()
         else:

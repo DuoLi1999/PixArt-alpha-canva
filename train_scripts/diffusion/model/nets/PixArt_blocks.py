@@ -16,6 +16,7 @@ from einops import rearrange, repeat
 import xformers.ops
 
 from diffusion.model.utils import add_decomposed_rel_pos
+from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
 
 
 def modulate(x, shift, scale):
@@ -54,7 +55,7 @@ class MultiHeadCrossAttention(nn.Module):
             attn_bias = xformers.ops.fmha.BlockDiagonalMask.from_seqlens([N] * B, mask)
         #支持flash attention
         if self.use_flash_attn:
-            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+            x = flash_attn_func(q, k, v, dropout_p=self.attn_drop.p)
         else:
             x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
         x = x.view(B, -1, C)
@@ -126,7 +127,7 @@ class WindowAttention(Attention_):
             attn_bias.masked_fill_(mask.squeeze(1).repeat(self.num_heads, 1, 1) == 0, float('-inf'))
         #支持flash attention
         if self.use_flash_attn:
-            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+            x = flash_attn_func(q, k, v, dropout_p=self.attn_drop.p)
 
         else:
             x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)

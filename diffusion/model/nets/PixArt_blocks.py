@@ -16,6 +16,8 @@ from einops import rearrange, repeat
 import xformers.ops
 
 from diffusion.model.utils import add_decomposed_rel_pos
+# from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
+import torch.nn.functional as F
 
 
 def modulate(x, shift, scale):
@@ -27,13 +29,14 @@ def t2i_modulate(x, shift, scale):
 
 
 class MultiHeadCrossAttention(nn.Module):
-    def __init__(self, d_model, num_heads, attn_drop=0., proj_drop=0., **block_kwargs):
+    def __init__(self, d_model, num_heads, attn_drop=0., proj_drop=0., use_flash_attn=False,**block_kwargs):
         super(MultiHeadCrossAttention, self).__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
 
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
+        self.use_flash_attn = use_flash_attn
 
         self.q_linear = nn.Linear(d_model, d_model)
         self.kv_linear = nn.Linear(d_model, d_model*2)
@@ -44,14 +47,48 @@ class MultiHeadCrossAttention(nn.Module):
     def forward(self, x, cond, mask=None):
         # query/value: img tokens; key: condition; mask: if padding tokens
         B, N, C = x.shape
-
         q = self.q_linear(x).view(1, -1, self.num_heads, self.head_dim)
         kv = self.kv_linear(cond).view(1, -1, 2, self.num_heads, self.head_dim)
-        k, v = kv.unbind(2)
+        k, v = kv.unbind(2) #[]
         attn_bias = None
         if mask is not None:
             attn_bias = xformers.ops.fmha.BlockDiagonalMask.from_seqlens([N] * B, mask)
-        x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+
+        #支持flash attention
+        if self.use_flash_attn:
+            #flash attention版本
+            # x = flash_attn_func(q, k, v, dropout_p=self.attn_drop.p)
+            #pytorch版本
+            # MASK=[torch.ones(N,i,dtype=torch.bool) for i in mask]
+            # MASK=torch.block_diag(*MASK)
+            # MASK=MASK.unsqueeze(0).unsqueeze(0).repeat(1,self.num_heads,1,1).to(x.device)
+            # q=q.permute(0,2,1,3)
+            # k=k.permute(0,2,1,3)
+            # v=v.permute(0,2,1,3)
+            # x=F.scaled_dot_product_attention(q, k, v, attn_mask=MASK, dropout_p=self.attn_drop.p)
+            # x=x.permute(0,2,1,3).squeeze(0)
+            #手工版本
+            
+            use_fp32_attention = getattr(self, 'fp32_attention', False)
+            if use_fp32_attention:
+                q, k = q.float(), k.float()
+            q=q.permute(0,2,1,3)
+            k=k.permute(0,2,1,3)
+            v=v.permute(0,2,1,3)
+
+            self.scale = self.head_dim ** -0.5
+            with torch.cuda.amp.autocast(enabled=not use_fp32_attention):
+                attn = (q @ k.transpose(-2, -1)) * self.scale
+                attn = attn.softmax(dim=-1)
+
+            attn = self.attn_drop(attn)
+
+            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+
+
+        else:
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+        
         x = x.view(B, -1, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -82,6 +119,7 @@ class WindowAttention(Attention_):
         use_rel_pos=False,
         rel_pos_zero_init=True,
         input_size=None,
+        use_flash_attn=False,
         **block_kwargs,
     ):
         """
@@ -97,6 +135,7 @@ class WindowAttention(Attention_):
         super().__init__(dim, num_heads=num_heads, qkv_bias=qkv_bias, **block_kwargs)
 
         self.use_rel_pos = use_rel_pos
+        self.use_flash_attn = use_flash_attn
         if self.use_rel_pos:
             # initialize relative positional embeddings
             self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, self.head_dim))
@@ -117,7 +156,35 @@ class WindowAttention(Attention_):
         if mask is not None:
             attn_bias = torch.zeros([B * self.num_heads, q.shape[1], k.shape[1]], dtype=q.dtype, device=q.device)
             attn_bias.masked_fill_(mask.squeeze(1).repeat(self.num_heads, 1, 1) == 0, float('-inf'))
-        x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+        #支持flash attention
+        if self.use_flash_attn:
+            #flash attention版本
+            # x = flash_attn_func(q, k, v, dropout_p=self.attn_drop.p)
+            #pytorch版本
+            # q=q.permute(0,2,1,3)
+            # k=k.permute(0,2,1,3)
+            # v=v.permute(0,2,1,3)
+            # x=F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p)
+            # x=x.permute(0,2,1,3)
+            #手工版本
+            use_fp32_attention = getattr(self, 'fp32_attention', False)
+            if use_fp32_attention:
+                q, k = q.float(), k.float()
+            q=q.permute(0,2,1,3)
+            k=k.permute(0,2,1,3)
+            v=v.permute(0,2,1,3)
+            self.scale = (C // self.num_heads) ** -0.5
+            with torch.cuda.amp.autocast(enabled=not use_fp32_attention):
+                attn = (q @ k.transpose(-2, -1)) * self.scale
+                attn = attn.softmax(dim=-1)
+
+            attn = self.attn_drop(attn)
+
+            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            
+
+        else:
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
 
         x = x.view(B, N, C)
         x = self.proj(x)
@@ -129,6 +196,9 @@ class WindowAttention(Attention_):
 #   AMP attention with fp32 softmax to fix loss NaN problem during training     #
 #################################################################################
 class Attention(Attention_):
+    def __init__(self,use_flash_attn=False, **block_kwargs):
+        super().__init__(**block_kwargs)
+        self.use_flash_attn = use_flash_attn
     def forward(self, x):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
@@ -347,7 +417,7 @@ class CaptionEmbedder(nn.Module):
 
     def __init__(self, in_channels, hidden_size, uncond_prob, act_layer=nn.GELU(approximate='tanh'), token_num=120):
         super().__init__()
-        self.y_proj_1 = Mlp(in_features=in_channels, hidden_features=hidden_size, out_features=hidden_size, act_layer=act_layer, drop=0)
+        self.y_proj = Mlp(in_features=in_channels, hidden_features=hidden_size, out_features=hidden_size, act_layer=act_layer, drop=0)
         self.register_buffer("y_embedding_1", nn.Parameter(torch.randn(token_num, in_channels) / in_channels ** 0.5))
         self.uncond_prob = uncond_prob
 
@@ -368,7 +438,7 @@ class CaptionEmbedder(nn.Module):
         use_dropout = self.uncond_prob > 0
         if (train and use_dropout) or (force_drop_ids is not None):
             caption = self.token_drop(caption, force_drop_ids)
-        caption = self.y_proj_1(caption)
+        caption = self.y_proj(caption)
         return caption
 
 

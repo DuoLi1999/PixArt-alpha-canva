@@ -11,13 +11,17 @@ import torch
 
 import torchvision.utils
 from diffusion import DPMS
+import os
 
 from diffusion.data.datasets import get_chunks, ASPECT_RATIO_512_TEST, ASPECT_RATIO_1024_TEST
 
 
 
 @torch.inference_mode()
-def visualize(model,vae,path,step,device,bs=1, resolution=512, ar=1.,sample_steps=20, cfg_scale=4.5):
+def visualize(model,vae,path,step,device,name=None,bs=1, resolution=512, ar=1.,sample_steps=20, cfg_scale=4.5):
+    if not os.path.exists(f'samples/{name}'):
+        os.mkdir(f'samples/{name}')
+
     caption_embs = torch.load(path, map_location=torch.device(device))
     model.eval()
     latent_size = resolution // 8
@@ -37,7 +41,7 @@ def visualize(model,vae,path,step,device,bs=1, resolution=512, ar=1.,sample_step
 
             # Create sampling noise:
             z = torch.randn(1, 4, latent_size_h, latent_size_w, device=device)
-            model_kwargs = dict(data_info={'img_hw': hw, 'aspect_ratio': ar}, mask=None)
+            model_kwargs = dict(data_info={'img_hw': hw, 'aspect_ratio': ar}, mask=None)#改掉mask
             dpm_solver = DPMS(model.forward_with_dpmsolver,
                                 condition=caption_embs,
                                 uncondition=null_y,
@@ -55,7 +59,7 @@ def visualize(model,vae,path,step,device,bs=1, resolution=512, ar=1.,sample_step
         samples_list.append(samples.squeeze(0))
         torch.cuda.empty_cache()
     samples_tensor = torch.stack(samples_list)
-    torchvision.utils.save_image(samples_tensor, f'output/image_{step}.png')
+    torchvision.utils.save_image(samples_tensor, f'samples/{name}/image_{step}.png')
 
 
 

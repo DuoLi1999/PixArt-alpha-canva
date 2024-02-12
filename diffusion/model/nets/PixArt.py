@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
+# Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
 # This source code is licensed under the license found in the
@@ -27,14 +28,15 @@ class PixArtBlock(nn.Module):
     A PixArt block with adaptive layer norm (adaLN-single) conditioning.
     """
 
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, drop_path=0., window_size=0, input_size=None, use_rel_pos=False, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, drop_path=0., window_size=0, input_size=None, use_rel_pos=False,use_flash_attn=False, **block_kwargs):
         super().__init__()
         self.hidden_size = hidden_size
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = WindowAttention(hidden_size, num_heads=num_heads, qkv_bias=True,
                                     input_size=input_size if window_size == 0 else (window_size, window_size),
-                                    use_rel_pos=use_rel_pos, **block_kwargs)
-        self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, **block_kwargs)
+                                    use_rel_pos=use_rel_pos, 
+                                    use_flash_attn=use_flash_attn,**block_kwargs)
+        self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, use_flash_attn=use_flash_attn,**block_kwargs)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         # to be compatible with lower version pytorch
         approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -63,10 +65,16 @@ class PixArt(nn.Module):
     Diffusion model with a Transformer backbone.
     """
 
-    def __init__(self, input_size=32, patch_size=2, in_channels=4, hidden_size=1152, depth=28, num_heads=16, mlp_ratio=4.0, class_dropout_prob=0.1, pred_sigma=True, drop_path: float = 0., window_size=0, window_block_indexes=None, use_rel_pos=False, caption_channels=4096, lewei_scale=1.0, config=None, model_max_length=120, **kwargs):
+    def __init__(self, input_size=32, patch_size=2, in_channels=4, hidden_size=1152, depth=28, num_heads=16, mlp_ratio=4.0, class_dropout_prob=0.1, pred_sigma=True, drop_path: float = 0., window_size=0, window_block_indexes=None, use_rel_pos=False, caption_channels=4096, lewei_scale=1.0, config=None, model_max_length=120,use_flash_attn=False, **kwargs):
         if window_block_indexes is None:
             window_block_indexes = []
         super().__init__()
+        use_flash_attn=config['use_flash_attn']
+        self.use_flash_attn = use_flash_attn
+        if use_flash_attn:
+            print('Using Flash Attention')
+        else:
+            print('Not Using Flash Attention')
         self.pred_sigma = pred_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if pred_sigma else in_channels
@@ -92,7 +100,7 @@ class PixArt(nn.Module):
             PixArtBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, drop_path=drop_path[i],
                           input_size=(input_size // patch_size, input_size // patch_size),
                           window_size=window_size if i in window_block_indexes else 0,
-                          use_rel_pos=use_rel_pos if i in window_block_indexes else False)
+                          use_rel_pos=use_rel_pos if i in window_block_indexes else False,use_flash_attn=use_flash_attn)
             for i in range(depth)
         ])
         self.final_layer = T2IFinalLayer(hidden_size, patch_size, self.out_channels)
@@ -120,13 +128,14 @@ class PixArt(nn.Module):
         if mask is not None:
             if mask.shape[0] != y.shape[0]:
                 mask = mask.repeat(y.shape[0] // mask.shape[0], 1)
-            mask = mask.squeeze(1).squeeze(1)
+            mask = mask.squeeze(1).squeeze(1)  # (N, 1, 1, L) -> (N, L)
             y = y.squeeze(1).masked_select(mask.unsqueeze(-1) != 0).view(1, -1, x.shape[-1])
             y_lens = mask.sum(dim=1).tolist()
         else:
             y_lens = [y.shape[2]] * y.shape[0]
             y = y.squeeze(1).view(1, -1, x.shape[-1])
         for block in self.blocks:
+            
             x = auto_grad_checkpoint(block, x, y, t0, y_lens)  # (N, T, D) #support grad checkpoint
         x = self.final_layer(x, t)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
@@ -193,8 +202,8 @@ class PixArt(nn.Module):
         nn.init.normal_(self.t_block[1].weight, std=0.02)
 
         # Initialize caption embedding MLP:
-        nn.init.normal_(self.y_embedder.y_proj_1.fc1.weight, std=0.02)
-        nn.init.normal_(self.y_embedder.y_proj_1.fc2.weight, std=0.02)
+        nn.init.normal_(self.y_embedder.y_proj.fc1.weight, std=0.02)
+        nn.init.normal_(self.y_embedder.y_proj.fc2.weight, std=0.02)
 
         # Zero-out adaLN modulation layers in PixArt blocks:
         for block in self.blocks:
@@ -261,4 +270,5 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
 #################################################################################
 @MODELS.register_module()
 def PixArt_XL_2(**kwargs):
+
     return PixArt(depth=28, hidden_size=1152, patch_size=2, num_heads=16, **kwargs)
