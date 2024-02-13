@@ -146,4 +146,5 @@ class Canva8ChannelsDataset(Dataset):
         #     mask=~torch.all(text_embed-text_embed[-1]==0,dim=-1)
         mask=text_tokens_and_mask['attention_mask']>0
         return alpha_tensor,text_embed,mask.squeeze(0),False
+    
         

@@ -89,7 +89,7 @@ def train():
             with accelerator.accumulate(model):
                 # Predict the noise residual
                 optimizer.zero_grad()
-                loss_term = train_diffusion.training_losses(model, clean_images, timesteps, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info))
+                loss_term = train_diffusion.training_losses(model, clean_images, timesteps, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info),noise_offset=config.noise_offset)
                 loss = loss_term['loss'].mean()
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -122,7 +122,7 @@ def train():
 
             if global_step%config.sample_model_steps==0:
                 if accelerator.is_main_process:
-                    visualize(accelerator.unwrap_model(model),vae,args.emb_path,global_step,y.device,args.tracker_experiment_name)
+                    visualize(accelerator.unwrap_model(model),vae,args.emb_path,args.mask_path,global_step,y.device,args.tracker_experiment_name)
 
 
             logs.update(lr=lr)
@@ -176,6 +176,7 @@ def parse_args():
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--blob-path', default='/pyy/openseg_blob' )
     parser.add_argument('--emb_path',default='/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/samples/text_embed.pt' )
+    parser.add_argument('--mask_path',default='/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/samples/mask.pt' )
     parser.add_argument(
         "--report_to",
         type=str,
@@ -197,7 +198,7 @@ def parse_args():
     parser.add_argument(
         "--tracker_experiment_name",
         type=str,
-        default="unmask_lr2e-5",
+        default="try",
         help=(
             "The `experiment_name` argument passed to Accelerator.init_trackers for"
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
@@ -279,7 +280,7 @@ if __name__ == '__main__':
                   'model_max_length': config.model_max_length}
 
     # build models
-    train_diffusion = IDDPM(str(config.train_sampling_steps), learn_sigma=learn_sigma, pred_sigma=pred_sigma, snr=config.snr_loss)
+    train_diffusion = IDDPM(str(config.train_sampling_steps), learn_sigma=learn_sigma, pred_sigma=pred_sigma, snr=config.snr_loss,zero_snr=config.zero_snr)
     model = build_model(config.model,
                         config.grad_checkpointing,
                         config.get('fp32_attention', False),

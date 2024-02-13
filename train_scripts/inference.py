@@ -18,17 +18,19 @@ from diffusion.data.datasets import get_chunks, ASPECT_RATIO_512_TEST, ASPECT_RA
 
 
 @torch.inference_mode()
-def visualize(model,vae,path,step,device,name=None,bs=1, resolution=512, ar=1.,sample_steps=20, cfg_scale=4.5):
+def visualize(model,vae,path,mask_path,step,device,name=None,bs=1, resolution=512, ar=1.,sample_steps=20, cfg_scale=4.5):
     if not os.path.exists(f'samples/{name}'):
         os.mkdir(f'samples/{name}')
 
     caption_embs = torch.load(path, map_location=torch.device(device))
+    mask = torch.load(mask_path, map_location=torch.device(device))
     model.eval()
     latent_size = resolution // 8
 
     samples_list=[]
-    for chunk in tqdm(list(get_chunks(caption_embs, bs)), unit='batch'):
-        # if bs == 1:     
+    for idx,chunk in enumerate(tqdm(list(get_chunks(caption_embs, bs)), unit='batch')):
+        # if bs == 1: 
+        mask_chunk=list(get_chunks(mask, bs))[idx]
         hw = torch.tensor([[resolution,resolution]], dtype=torch.float, device=device).repeat(bs, 1)
         ar = torch.tensor([[ar]], device=device).repeat(bs, 1)
         latent_size_h, latent_size_w = latent_size, latent_size
@@ -41,7 +43,8 @@ def visualize(model,vae,path,step,device,name=None,bs=1, resolution=512, ar=1.,s
 
             # Create sampling noise:
             z = torch.randn(1, 4, latent_size_h, latent_size_w, device=device)
-            model_kwargs = dict(data_info={'img_hw': hw, 'aspect_ratio': ar}, mask=None)#改掉mask
+            print(mask_chunk.shape)
+            model_kwargs = dict(data_info={'img_hw': hw, 'aspect_ratio': ar}, mask=mask_chunk.to(device))#改掉mask
             dpm_solver = DPMS(model.forward_with_dpmsolver,
                                 condition=caption_embs,
                                 uncondition=null_y,
@@ -54,6 +57,8 @@ def visualize(model,vae,path,step,device,name=None,bs=1, resolution=512, ar=1.,s
                 skip_type="time_uniform",
                 method="multistep",
             )
+        if idx>16:
+            break
 
         samples = vae.decode(samples / 0.18215).sample
         samples_list.append(samples.squeeze(0))

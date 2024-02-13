@@ -6,7 +6,6 @@
 
 import enum
 import math
-
 import numpy as np
 import torch as th
 import torch.nn.functional as F
@@ -141,7 +140,37 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
     return np.array(betas)
 
+def rescale_zero_terminal_snr(betas):
+        """
+        Rescales betas to have zero terminal SNR Based on https://arxiv.org/pdf/2305.08891.pdf (Algorithm 1)
+        Args:
+            betas (`torch.FloatTensor`):
+                the betas that the scheduler is being initialized with.
+        Returns:
+            `torch.FloatTensor`: rescaled betas with zero terminal SNR
+        """
+        # Convert betas to alphas_bar_sqrt
+        alphas = 1.0-betas
+        alphas_cumprod = th.cumprod(alphas, dim=0)
+        alphas_bar_sqrt = alphas_cumprod.sqrt()
 
+        # Store old values.
+        alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
+        alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
+
+        # Shift so the last timestep is zero.
+        alphas_bar_sqrt -= alphas_bar_sqrt_T
+
+        # Scale so the first timestep is back to the old value.
+        alphas_bar_sqrt *= alphas_bar_sqrt_0/(alphas_bar_sqrt_0-alphas_bar_sqrt_T)
+
+        # Convert alphas_bar_sqrt to betas
+        alphas_bar = alphas_bar_sqrt**2  # Revert sqrt
+        alphas = alphas_bar[1:]/alphas_bar[:-1]  # Revert cumprod
+        alphas = th.cat([alphas_bar[0:1], alphas])
+        betas = 1-alphas
+
+        return betas
 class GaussianDiffusion:
     """
     Utilities for training and sampling diffusion models.
@@ -160,6 +189,7 @@ class GaussianDiffusion:
         loss_type,
         snr=False,
         return_startx=False,
+        zero_snr=False,
     ):
 
         self.model_mean_type = model_mean_type
@@ -167,9 +197,14 @@ class GaussianDiffusion:
         self.loss_type = loss_type
         self.snr = snr
         self.return_startx = return_startx
+        self.zero_snr = zero_snr
 
         # Use float64 for accuracy.
-        betas = np.array(betas, dtype=np.float64)
+        if self.zero_snr:
+            betas = np.array(rescale_zero_terminal_snr(th.tensor(np.array(betas, dtype=np.float64))))
+        else:
+            betas = np.array(betas, dtype=np.float64)
+        
         self.betas = betas
         assert len(betas.shape) == 1, "betas must be 1-D"
         assert (betas > 0).all() and (betas <= 1).all()
@@ -711,7 +746,7 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, timestep, model_kwargs=None, noise=None, skip_noise=False):
+    def training_losses(self, model, x_start, timestep, model_kwargs=None, noise=None, skip_noise=False, noise_offset=0.0):
         """
         Compute training losses for a single timestep.
         :param model: the model to evaluate loss on.
@@ -731,6 +766,8 @@ class GaussianDiffusion:
         else:
             if noise is None:
                 noise = th.randn_like(x_start)
+                if noise_offset > 0 and noise_offset<1:    
+                    noise += 0.1 * th.randn((x_start.shape[0], x_start.shape[1], 1, 1), device=x_start.device)
             x_t = self.q_sample(x_start, t, noise=noise)
 
         terms = {}

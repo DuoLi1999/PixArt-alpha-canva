@@ -18,6 +18,7 @@ import xformers.ops
 from diffusion.model.utils import add_decomposed_rel_pos
 # from flash_attn import flash_attn_qkvpacked_func, flash_attn_func
 import torch.nn.functional as F
+import time
 
 
 def modulate(x, shift, scale):
@@ -51,44 +52,66 @@ class MultiHeadCrossAttention(nn.Module):
         kv = self.kv_linear(cond).view(1, -1, 2, self.num_heads, self.head_dim)
         k, v = kv.unbind(2) #[]
         attn_bias = None
+        
         if mask is not None:
+            # start=time.time()
             attn_bias = xformers.ops.fmha.BlockDiagonalMask.from_seqlens([N] * B, mask)
+            # print("MASK time:",time.time()-start)
 
         #支持flash attention
         if self.use_flash_attn:
             #flash attention版本
             # x = flash_attn_func(q, k, v, dropout_p=self.attn_drop.p)
             #pytorch版本
+            # start=time.time()
             # MASK=[torch.ones(N,i,dtype=torch.bool) for i in mask]
             # MASK=torch.block_diag(*MASK)
             # MASK=MASK.unsqueeze(0).unsqueeze(0).repeat(1,self.num_heads,1,1).to(x.device)
+            # print("MASK time:",time.time()-start)
+            
             # q=q.permute(0,2,1,3)
             # k=k.permute(0,2,1,3)
             # v=v.permute(0,2,1,3)
+
+            # print("cross attention")
+            # print("q.shape",q.shape)
+            # print("k.shape",k.shape)
+            # print("v.shape",v.shape)
+            # print("MASK.shape",MASK.shape)
+            # start=time.time()
             # x=F.scaled_dot_product_attention(q, k, v, attn_mask=MASK, dropout_p=self.attn_drop.p)
+            # print("cross attention time",time.time()-start)
+
             # x=x.permute(0,2,1,3).squeeze(0)
+            
             #手工版本
             
-            use_fp32_attention = getattr(self, 'fp32_attention', False)
-            if use_fp32_attention:
-                q, k = q.float(), k.float()
-            q=q.permute(0,2,1,3)
-            k=k.permute(0,2,1,3)
-            v=v.permute(0,2,1,3)
+            # use_fp32_attention = getattr(self, 'fp32_attention', False)
+            # if use_fp32_attention:
+            #     q, k = q.float(), k.float()
+            # q=q.permute(0,2,1,3)
+            # k=k.permute(0,2,1,3)
+            # v=v.permute(0,2,1,3)
 
-            self.scale = self.head_dim ** -0.5
-            with torch.cuda.amp.autocast(enabled=not use_fp32_attention):
-                attn = (q @ k.transpose(-2, -1)) * self.scale
-                attn = attn.softmax(dim=-1)
+            # self.scale = self.head_dim ** -0.5
+            # with torch.cuda.amp.autocast(enabled=not use_fp32_attention):
+            #     attn = (q @ k.transpose(-2, -1)) * self.scale
+            #     attn = attn.softmax(dim=-1)
 
-            attn = self.attn_drop(attn)
+            # attn = self.attn_drop(attn)
 
-            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            #xformers版本
+            x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+
 
 
         else:
+            # start=time.time()
             x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+            # print("cross attention time",time.time()-start)
         
+
         x = x.view(B, -1, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -151,7 +174,6 @@ class WindowAttention(Attention_):
         q, k, v = qkv.unbind(2)
         if use_fp32_attention := getattr(self, 'fp32_attention', False):
             q, k, v = q.float(), k.float(), v.float()
-
         attn_bias = None
         if mask is not None:
             attn_bias = torch.zeros([B * self.num_heads, q.shape[1], k.shape[1]], dtype=q.dtype, device=q.device)
@@ -160,31 +182,39 @@ class WindowAttention(Attention_):
         if self.use_flash_attn:
             #flash attention版本
             # x = flash_attn_func(q, k, v, dropout_p=self.attn_drop.p)
-            #pytorch版本
-            # q=q.permute(0,2,1,3)
-            # k=k.permute(0,2,1,3)
-            # v=v.permute(0,2,1,3)
-            # x=F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p)
-            # x=x.permute(0,2,1,3)
-            #手工版本
-            use_fp32_attention = getattr(self, 'fp32_attention', False)
-            if use_fp32_attention:
-                q, k = q.float(), k.float()
+            # pytorch版本
             q=q.permute(0,2,1,3)
             k=k.permute(0,2,1,3)
             v=v.permute(0,2,1,3)
-            self.scale = (C // self.num_heads) ** -0.5
-            with torch.cuda.amp.autocast(enabled=not use_fp32_attention):
-                attn = (q @ k.transpose(-2, -1)) * self.scale
-                attn = attn.softmax(dim=-1)
+            # start = time.time()
+            # print("window attention")
+            # print("q.shape",q.shape)
+            # print("k.shape",k.shape)
+            # print("v.shape",v.shape)
+            x=F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p)
+            # print("window attention time",time.time()-start)
+            x=x.permute(0,2,1,3)
+            #手工版本
+            # use_fp32_attention = getattr(self, 'fp32_attention', False)
+            # if use_fp32_attention:
+            #     q, k = q.float(), k.float()
+            # q=q.permute(0,2,1,3)
+            # k=k.permute(0,2,1,3)
+            # v=v.permute(0,2,1,3)
+            # self.scale = (C // self.num_heads) ** -0.5
+            # with torch.cuda.amp.autocast(enabled=not use_fp32_attention):
+            #     attn = (q @ k.transpose(-2, -1)) * self.scale
+            #     attn = attn.softmax(dim=-1)
 
-            attn = self.attn_drop(attn)
+            # attn = self.attn_drop(attn)
 
-            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            # x = (attn @ v).transpose(1, 2).reshape(B, N, C)
             
 
         else:
+            # start = time.time()
             x = xformers.ops.memory_efficient_attention(q, k, v, p=self.attn_drop.p, attn_bias=attn_bias)
+            # print("window attention time",time.time()-start)
 
         x = x.view(B, N, C)
         x = self.proj(x)
