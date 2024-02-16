@@ -16,6 +16,7 @@ if __name__ == '__main__':
             target_img_type=None,
             prompt_mode = 'whole',
             )   
+#     dataset.split()
     train_dataloader = build_dataloader(dataset, num_workers=0, batch_size=200, shuffle=True)
     for data in train_dataloader:
         with open('samples/text_embed.pt', 'wb') as f:
@@ -23,4 +24,5 @@ if __name__ == '__main__':
         with open('samples/mask.pt', 'wb') as f:
                 torch.save(data[2], f)
         break
-#     dataset.info('samples/sample_info.json')
+
+    dataset.info('samples/sample_info.json')

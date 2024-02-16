@@ -25,11 +25,11 @@ grad_checkpointing = True
 gradient_clip = 0.01
 optimizer = dict(type='AdamW', lr=2e-5, weight_decay=3e-2, eps=1e-10)
 lr_schedule_args = dict(num_warmup_steps=1000)
-noise_offset=0.1
-zero_snr = False
+noise_offset=0.0
+zero_snr = True
 mixed_precision = 'bf16'
 
 eval_sampling_steps = 200
 log_interval = 20
 save_model_epochs=1
-work_dir = 'output/try'
+work_dir = 'output/bf16_snr_only'

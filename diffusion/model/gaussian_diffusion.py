@@ -848,7 +848,7 @@ class GaussianDiffusion:
                     terms['mae'] = model_kwargs['mask_loss_coef'] * mean_flat(loss * mask) * mask.shape[1]/mask.sum(1)
             else:
                 terms["mse"] = mean_flat(loss)
-            terms["loss"] = terms["mse"] + terms["vb"] if "vb" in terms else terms["mse"]
+            terms["loss"] = terms["mse"] + terms["vb"] if "vb" in terms and not th.isnan(terms["vb"]).any() else terms["mse"]
             if "mae" in terms:
                 terms["loss"] = terms["loss"] + terms["mae"]
         else:

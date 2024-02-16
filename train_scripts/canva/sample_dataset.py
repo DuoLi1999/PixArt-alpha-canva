@@ -15,6 +15,7 @@ import torchvision.transforms.functional as F
 
 from PIL import Image
 
+
 def _resize_and_center_pad(img, resolution, transforms, padding_mode='constant'):
     w, h = img.size
     resize_w, resize_h = _get_resize_shape(w, h, resolution)
@@ -75,6 +76,7 @@ class Canva8ChannelsDataset(Dataset):
             torchvision.transforms.Normalize([0.5], [0.5])
         ])
         self.ann_list = []
+        self.ann_path=ann_path
         if category == 'all':
             with open(ann_path, 'r') as f:
                 for i, line in enumerate((f.readlines())):
@@ -86,7 +88,7 @@ class Canva8ChannelsDataset(Dataset):
             self.ann_list = self.ann_list[:-50000]
         elif train=='val':
             self.ann_list = self.ann_list[-50000:]
-        self.sample_dict=[]
+        self.sample_dict={}
 
 
     def __len__(self):
@@ -95,6 +97,7 @@ class Canva8ChannelsDataset(Dataset):
     def __getitem__(self, idx):
         try:
             ann = self.ann_list[idx]
+            self.sample_dict[ann['_id']]=ann["category"] + ". "+ann['caption']
             
             prompt = ann['caption']
             folder = ann['_id'] # ann['rendered_folder']
@@ -153,4 +156,19 @@ class Canva8ChannelsDataset(Dataset):
         
         with open(file_name,'w') as f:
             json.dump(self.sample_dict,f,indent=4)
+
+    def split(self,test_len=200):
+        index = list(range(len(self.ann_list))) # 保留下标
+        random.shuffle(index) 
+        test_index = index[:test_len]
+        test_list=[self.ann_list[i] for i in test_index]
+        train_index = index[test_len:]
+        train_list=[self.ann_list[i] for i in train_index]
+        test_path=self.ann_path.replace('.json','_test.json')
+        train_path=self.ann_path.replace('.json','_train.json')
+        with open(test_path,'w') as f:
+            json.dump(test_list,f,indent=4)
+        with open(train_path,'w') as f:
+            json.dump(train_list,f,indent=4)
+
         
