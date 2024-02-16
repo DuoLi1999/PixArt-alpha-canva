@@ -767,7 +767,7 @@ class GaussianDiffusion:
             if noise is None:
                 noise = th.randn_like(x_start)
                 if noise_offset > 0 and noise_offset<1:    
-                    noise += 0.1 * th.randn((x_start.shape[0], x_start.shape[1], 1, 1), device=x_start.device)
+                    noise += noise_offset * th.randn((x_start.shape[0], x_start.shape[1], 1, 1), device=x_start.device)
             x_t = self.q_sample(x_start, t, noise=noise)
 
         terms = {}

@@ -26,3 +26,4 @@ def DPMS(model, condition, uncondition, cfg_scale, model_type='noise', noise_sch
     )
     ## 3. Define dpm-solver and sample by multistep DPM-Solver.
     return DPM_Solver(model_fn, noise_schedule, algorithm_type="dpmsolver++")
+

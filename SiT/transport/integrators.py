@@ -101,6 +101,8 @@ class ode:
         def _fn(t, x):
             t = th.ones(x[0].size(0)).to(device) * t if isinstance(x, tuple) else th.ones(x.size(0)).to(device) * t
             model_output = self.drift(x, t, model, **model_kwargs)
+            if model_output.shape[1]== 2*x.shape[1]:
+                model_output = model_output[:, :x.shape[1]]
             return model_output
 
         t = self.t.to(device)

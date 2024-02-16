@@ -117,6 +117,7 @@ class Transport:
         self, 
         model,  
         x1, 
+        noise_offset = 0.0,
         model_kwargs=None
     ):
         """Loss for training the score model
@@ -129,9 +130,14 @@ class Transport:
             model_kwargs = {}
         
         t, x0, x1 = self.sample(x1)
+        if noise_offset > 0 and noise_offset < 1:
+            x0 += noise_offset * th.randn((x1.shape[0], x1.shape[1], 1, 1), device=x1.device)
         t, xt, ut = self.path_sampler.plan(t, x0, x1)
         model_output = model(xt, t, **model_kwargs)
         B, *_, C = xt.shape
+
+        model_output, model_var_values = th.split(model_output, xt.shape[1], dim=1)
+
         assert model_output.size() == (B, *xt.size()[1:-1], C)
 
         terms = {}
@@ -171,6 +177,8 @@ class Transport:
             drift_mean, drift_var = self.path_sampler.compute_drift(x, t)
             sigma_t, _ = self.path_sampler.compute_sigma_t(path.expand_t_like_x(t, x))
             model_output = model(x, t, **model_kwargs)
+            if model_output.shape[1]== 2*x.shape[1]:
+                model_output = model_output[:, :x.shape[1]]
             score = model_output / -sigma_t
             return (-drift_mean + drift_var * score)
         
@@ -187,6 +195,9 @@ class Transport:
         
         def body_fn(x, t, model, **model_kwargs):
             model_output = drift_fn(x, t, model, **model_kwargs)
+            if model_output.shape[1]== 2*x.shape[1]:
+                model_output = model_output[:, :x.shape[1]]
+
             assert model_output.shape == x.shape, "Output shape from ODE solver must match input shape"
             return model_output
 

@@ -15,7 +15,7 @@ from accelerate.utils import DistributedType
 from diffusers.models import AutoencoderKL
 from mmcv.runner import LogBuffer
 from torch.utils.data import RandomSampler
-from inference import visualize
+from inference_SiT_schedule import visualize
 from diffusion import IDDPM
 from diffusion.data.builder import build_dataset, build_dataloader, set_data_root
 from diffusion.model.builder import build_model
@@ -26,6 +26,9 @@ from diffusion.utils.logger import get_root_logger
 from diffusion.utils.lr_scheduler import build_lr_scheduler
 from diffusion.utils.misc import set_random_seed, read_config, init_random_seed, DebugUnderflowOverflow
 from diffusion.utils.optimizer import build_optimizer, auto_scale_lr
+
+from SiT.transport import create_transport, Sampler
+from SiT.train_utils import parse_transport_args
 
 warnings.filterwarnings("ignore")  # ignore warning
 
@@ -84,13 +87,17 @@ def train():
 
             # Sample a random timestep for each image
             bs = clean_images.shape[0]
-            timesteps = torch.randint(0, config.train_sampling_steps, (bs,), device=clean_images.device).long()
+            # timesteps = torch.randint(0, config.train_sampling_steps, (bs,), device=clean_images.device).long()
             grad_norm = None
             with accelerator.accumulate(model):
                 # Predict the noise residual
                 optimizer.zero_grad()
-                loss_term = train_diffusion.training_losses(model, clean_images, timesteps, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info),noise_offset=config.noise_offset)
-                loss = loss_term['loss'].mean()
+                # 改SiT
+                # loss_term = train_diffusion.training_losses(model, clean_images, timesteps, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info),noise_offset=config.noise_offset)
+                # loss = loss_term['loss'].mean()
+                loss_dict = transport.training_losses(model, clean_images, model_kwargs=dict(y=y, mask=y_mask, data_info=data_info),noise_offset=config.noise_offset)
+                loss = loss_dict["loss"].mean()
+                # 改SiT end
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     grad_norm = accelerator.clip_grad_norm_(model.parameters(), config.gradient_clip)
@@ -122,7 +129,7 @@ def train():
 
             if global_step%config.sample_model_steps==0:
                 if accelerator.is_main_process:
-                    visualize(accelerator.unwrap_model(model),vae,args.emb_path,args.mask_path,global_step,y.device,args.tracker_experiment_name)
+                    visualize(accelerator.unwrap_model(model),vae,args.emb_path,args.mask_path,global_step,y.device,transport_sampler=transport_sampler, name=args.tracker_experiment_name)
 
 
             logs.update(lr=lr)
@@ -180,7 +187,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="wandb",
+        default="tensorboard",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -198,21 +205,23 @@ def parse_args():
     parser.add_argument(
         "--tracker_experiment_name",
         type=str,
-        default="bf16_snr_only",
+        default="try_SiT",
         help=(
             "The `experiment_name` argument passed to Accelerator.init_trackers for"
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
         ),
     )
     parser.add_argument("--loss_report_name", type=str, default="loss")
-
+    # 改SiT
+    parse_transport_args(parser)
+    # 改SiT end
     args = parser.parse_args()
     return args
 
 
 if __name__ == '__main__':
     args = parse_args()
-    config = read_config('/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/configs/pixart_config/PixArt_xl2_img512_design.py')
+    config = read_config('/pyy/yuyang_blob/pyy/code/PixArt-alpha-canva/configs/pixart_config/PixArt_xl2_img512_design_SiT.py')
     if args.work_dir is not None:
         # update configs according to CLI args if args.work_dir is not None
         config.work_dir = args.work_dir
@@ -280,7 +289,17 @@ if __name__ == '__main__':
                   'model_max_length': config.model_max_length}
 
     # build models
-    train_diffusion = IDDPM(str(config.train_sampling_steps), learn_sigma=learn_sigma, pred_sigma=pred_sigma, snr=config.snr_loss,zero_snr=config.zero_snr)
+    # 改SiT
+    transport = create_transport(
+        args.path_type,
+        args.prediction,
+        args.loss_weight,
+        args.train_eps,
+        args.sample_eps
+    )  # default: velocity; 
+    transport_sampler = Sampler(transport)
+    # train_diffusion = IDDPM(str(config.train_sampling_steps), learn_sigma=learn_sigma, pred_sigma=pred_sigma, snr=config.snr_loss,zero_snr=config.zero_snr)
+    # 改SiT end
     model = build_model(config.model,
                         config.grad_checkpointing,
                         config.get('fp32_attention', False),
