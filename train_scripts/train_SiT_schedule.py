@@ -187,7 +187,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="tensorboard",
+        default="wandb",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -205,7 +205,7 @@ def parse_args():
     parser.add_argument(
         "--tracker_experiment_name",
         type=str,
-        default="try_SiT",
+        default="SiT_base",
         help=(
             "The `experiment_name` argument passed to Accelerator.init_trackers for"
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"

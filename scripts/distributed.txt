@@ -1,3 +1,5 @@
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 train_scripts/train.py --work-dir output/try
 CUDA_VISIBLE_DEVICES=1 python train_scripts/train.py --work-dir output/bf16_xformers
 CUDA_VISIBLE_DEVICES=1 python train_scripts/train_SiT_schedule.py --work-dir output/try
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 train_scripts/train_SiT_schedule.py --work-dir output/SiT_base
